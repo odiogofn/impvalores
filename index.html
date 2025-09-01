@@ -77,6 +77,19 @@
       loadColumns(sheetName);
     });
 
+    // Função para encontrar a linha de cabeçalho válida
+    function findHeaderRow(rows) {
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        // Considera header válido se tiver pelo menos 2 colunas não vazias
+        const validCols = row.filter(col => col !== undefined && col !== null && col !== "").length;
+        if (validCols >= 2) {
+          return i;
+        }
+      }
+      return 0; // fallback
+    }
+
     // Função para carregar colunas
     function loadColumns(sheetName) {
       if (!workbookGlobal) return;
@@ -86,7 +99,8 @@
 
       if (rows.length === 0) return;
 
-      const headers = rows[0]; // primeira linha como cabeçalho
+      const headerRowIndex = findHeaderRow(rows);
+      const headers = rows[headerRowIndex]; // linha correta com cabeçalhos
       const columnsList = document.getElementById("columnsList");
       const container = document.getElementById("columnsContainer");
 
@@ -104,6 +118,7 @@
       });
 
       container.classList.remove("hidden");
+      container.setAttribute("data-header-index", headerRowIndex); // guardar posição do header
     }
 
     // Quando clicar em converter
@@ -117,6 +132,8 @@
       const sheet = workbookGlobal.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
+      const headerRowIndex = parseInt(document.getElementById("columnsContainer").getAttribute("data-header-index")) || 0;
+
       // Colunas selecionadas
       const selectedCols = Array.from(document.querySelectorAll(".colCheckbox:checked"))
                                .map(cb => parseInt(cb.value));
@@ -128,9 +145,14 @@
 
       let txtContent = "";
       rows.forEach((row, idx) => {
-        // pula cabeçalho se quiser só dados -> if (idx === 0) return;
+        if (idx <= headerRowIndex) return; // ignora cabeçalhos
+
         const line = selectedCols.map(colIndex => row[colIndex] !== undefined ? row[colIndex] : "").join(";");
-        if (line.trim() !== "") txtContent += line + "\n";
+        
+        // só exporta se tiver pelo menos um valor real
+        if (line.replace(/;/g, "").trim() !== "") {
+          txtContent += line + "\n";
+        }
       });
 
       const blob = new Blob([txtContent], { type: "text/plain;charset=utf-8" });
