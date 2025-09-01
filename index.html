@@ -8,41 +8,57 @@
 </head>
 <body class="bg-gray-100 min-h-screen flex items-center justify-center">
 
-  <div class="bg-white shadow-lg rounded-2xl p-8 w-full max-w-lg">
+  <div class="bg-white shadow-lg rounded-2xl p-8 w-full max-w-5xl">
     <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">Excel ➝ TXT</h2>
 
-    <div class="space-y-4">
-      <!-- Input arquivo -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Configurações -->
+      <div class="space-y-4">
+        <!-- Input arquivo -->
+        <div>
+          <label class="block text-sm font-medium text-gray-600 mb-1">Selecione a planilha:</label>
+          <input type="file" id="fileInput" accept=".xlsx,.xls" 
+                 class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-400 focus:outline-none" />
+        </div>
+
+        <!-- Select aba -->
+        <div>
+          <label for="sheetSelect" class="block text-sm font-medium text-gray-600 mb-1">Escolha a aba:</label>
+          <select id="sheetSelect" 
+                  class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-400 focus:outline-none">
+          </select>
+        </div>
+
+        <!-- Colunas dinâmicas -->
+        <div id="columnsContainer" class="hidden">
+          <label class="block text-sm font-medium text-gray-600 mb-2">Escolha as colunas:</label>
+          <div id="columnsList" class="grid grid-cols-2 gap-2"></div>
+        </div>
+
+        <!-- Botão -->
+        <button id="convertBtn" 
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
+          Converter e Baixar TXT
+        </button>
+      </div>
+
+      <!-- Preview -->
       <div>
-        <label class="block text-sm font-medium text-gray-600 mb-1">Selecione a planilha:</label>
-        <input type="file" id="fileInput" accept=".xlsx,.xls" 
-               class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-400 focus:outline-none" />
+        <h3 class="text-lg font-semibold text-gray-700 mb-2">Pré-visualização (10 primeiras linhas)</h3>
+        <div class="overflow-x-auto border border-gray-200 rounded-lg">
+          <table class="min-w-full text-sm text-left text-gray-600" id="previewTable">
+            <thead class="bg-gray-100 text-gray-700"></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
-
-      <!-- Select aba -->
-      <div>
-        <label for="sheetSelect" class="block text-sm font-medium text-gray-600 mb-1">Escolha a aba:</label>
-        <select id="sheetSelect" 
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-400 focus:outline-none">
-        </select>
-      </div>
-
-      <!-- Colunas dinâmicas -->
-      <div id="columnsContainer" class="hidden">
-        <label class="block text-sm font-medium text-gray-600 mb-2">Escolha as colunas:</label>
-        <div id="columnsList" class="grid grid-cols-2 gap-2"></div>
-      </div>
-
-      <!-- Botão -->
-      <button id="convertBtn" 
-              class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
-        Converter e Baixar TXT
-      </button>
     </div>
   </div>
 
   <script>
     let workbookGlobal = null;
+    let currentRows = [];
+    let headerRowIndex = 0;
 
     // Quando carrega a planilha
     document.getElementById("fileInput").addEventListener("change", function (e) {
@@ -81,13 +97,12 @@
     function findHeaderRow(rows) {
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-        // Considera header válido se tiver pelo menos 2 colunas não vazias
         const validCols = row.filter(col => col !== undefined && col !== null && col !== "").length;
         if (validCols >= 2) {
           return i;
         }
       }
-      return 0; // fallback
+      return 0;
     }
 
     // Função para carregar colunas
@@ -95,12 +110,12 @@
       if (!workbookGlobal) return;
 
       const sheet = workbookGlobal.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      currentRows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-      if (rows.length === 0) return;
+      if (currentRows.length === 0) return;
 
-      const headerRowIndex = findHeaderRow(rows);
-      const headers = rows[headerRowIndex]; // linha correta com cabeçalhos
+      headerRowIndex = findHeaderRow(currentRows);
+      const headers = currentRows[headerRowIndex];
       const columnsList = document.getElementById("columnsList");
       const container = document.getElementById("columnsContainer");
 
@@ -118,23 +133,61 @@
       });
 
       container.classList.remove("hidden");
-      container.setAttribute("data-header-index", headerRowIndex); // guardar posição do header
+
+      // Atualiza preview ao marcar/desmarcar colunas
+      columnsList.querySelectorAll(".colCheckbox").forEach(cb => {
+        cb.addEventListener("change", updatePreview);
+      });
     }
 
-    // Quando clicar em converter
+    // Atualizar preview
+    function updatePreview() {
+      const selectedCols = Array.from(document.querySelectorAll(".colCheckbox:checked"))
+                               .map(cb => parseInt(cb.value));
+
+      const previewHead = document.querySelector("#previewTable thead");
+      const previewBody = document.querySelector("#previewTable tbody");
+
+      previewHead.innerHTML = "";
+      previewBody.innerHTML = "";
+
+      if (selectedCols.length === 0) return;
+
+      // Cabeçalho
+      const headerRow = document.createElement("tr");
+      selectedCols.forEach(idx => {
+        const th = document.createElement("th");
+        th.className = "px-3 py-2 border-b border-gray-200";
+        th.textContent = currentRows[headerRowIndex][idx];
+        headerRow.appendChild(th);
+      });
+      previewHead.appendChild(headerRow);
+
+      // Primeiras 10 linhas de dados
+      for (let i = headerRowIndex + 1; i < currentRows.length && i <= headerRowIndex + 10; i++) {
+        const row = currentRows[i];
+        if (!row) continue;
+        const values = selectedCols.map(colIndex => row[colIndex] !== undefined ? row[colIndex] : "");
+        if (values.join("").trim() === "") continue;
+
+        const tr = document.createElement("tr");
+        values.forEach(val => {
+          const td = document.createElement("td");
+          td.className = "px-3 py-2 border-b border-gray-100";
+          td.textContent = val;
+          tr.appendChild(td);
+        });
+        previewBody.appendChild(tr);
+      }
+    }
+
+    // Converter e exportar
     document.getElementById("convertBtn").addEventListener("click", function () {
       if (!workbookGlobal) {
         alert("Selecione uma planilha primeiro!");
         return;
       }
 
-      const sheetName = document.getElementById("sheetSelect").value;
-      const sheet = workbookGlobal.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-
-      const headerRowIndex = parseInt(document.getElementById("columnsContainer").getAttribute("data-header-index")) || 0;
-
-      // Colunas selecionadas
       const selectedCols = Array.from(document.querySelectorAll(".colCheckbox:checked"))
                                .map(cb => parseInt(cb.value));
 
@@ -144,12 +197,10 @@
       }
 
       let txtContent = "";
-      rows.forEach((row, idx) => {
-        if (idx <= headerRowIndex) return; // ignora cabeçalhos
+      currentRows.forEach((row, idx) => {
+        if (idx <= headerRowIndex) return;
 
         const line = selectedCols.map(colIndex => row[colIndex] !== undefined ? row[colIndex] : "").join(";");
-        
-        // só exporta se tiver pelo menos um valor real
         if (line.replace(/;/g, "").trim() !== "") {
           txtContent += line + "\n";
         }
@@ -158,7 +209,7 @@
       const blob = new Blob([txtContent], { type: "text/plain;charset=utf-8" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = sheetName + "_resultado.txt";
+      link.download = "resultado.txt";
       link.click();
     });
   </script>
