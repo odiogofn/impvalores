@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Excel para TXT</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+
+  <div class="bg-white shadow-lg rounded-2xl p-8 w-full max-w-md">
+    <h2 class="text-2xl font-bold text-center text-gray-800 mb-6">Excel ➝ TXT</h2>
+
+    <div class="space-y-4">
+      <!-- Input arquivo -->
+      <div>
+        <label class="block text-sm font-medium text-gray-600 mb-1">Selecione a planilha:</label>
+        <input type="file" id="fileInput" accept=".xlsx,.xls" 
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-400 focus:outline-none" />
+      </div>
+
+      <!-- Select aba -->
+      <div>
+        <label for="sheetSelect" class="block text-sm font-medium text-gray-600 mb-1">Escolha a aba:</label>
+        <select id="sheetSelect" 
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-400 focus:outline-none">
+        </select>
+      </div>
+
+      <!-- Botão -->
+      <button id="convertBtn" 
+              class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
+        Converter e Baixar TXT
+      </button>
+    </div>
+  </div>
+
+  <script>
+    let workbookGlobal = null;
+
+    document.getElementById("fileInput").addEventListener("change", function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function (evt) {
+        const data = new Uint8Array(evt.target.result);
+        workbookGlobal = XLSX.read(data, { type: "array" });
+
+        // Preenche o select com as abas
+        const sheetSelect = document.getElementById("sheetSelect");
+        sheetSelect.innerHTML = "";
+        workbookGlobal.SheetNames.forEach((name, idx) => {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          if (idx === 0) option.selected = true; // primeira aba como padrão
+          sheetSelect.appendChild(option);
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    document.getElementById("convertBtn").addEventListener("click", function () {
+      if (!workbookGlobal) {
+        alert("Selecione uma planilha primeiro!");
+        return;
+      }
+
+      const sheetName = document.getElementById("sheetSelect").value;
+      const sheet = workbookGlobal.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      let txtContent = "";
+      rows.forEach(row => {
+        if (row[0] !== undefined && row[1] !== undefined) {
+          txtContent += row[0] + ";" + row[1] + "\n";
+        }
+      });
+
+      const blob = new Blob([txtContent], { type: "text/plain;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = sheetName + "_resultado.txt";
+      link.click();
+    });
+  </script>
+</body>
+</html>
