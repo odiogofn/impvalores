@@ -1,171 +1,268 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <title>Excel para TXT</title>
+  <meta charset="UTF-8" />
+  <title>Excel ➝ TXT (colunas selecionáveis)</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 flex items-center justify-center min-h-screen">
-  <div class="bg-white p-6 rounded-2xl shadow-lg w-full max-w-3xl">
-    <h2 class="text-2xl font-bold mb-4 text-gray-800">Converter Excel para TXT</h2>
-    
-    <!-- Upload -->
-    <input type="file" id="fileInput" accept=".xlsx,.xls" 
-           class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 
-                  file:rounded-full file:border-0 file:text-sm file:font-semibold 
-                  file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 mb-4"/>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center">
+  <div class="bg-white shadow-lg rounded-2xl p-8 w-full max-w-5xl">
+    <h1 class="text-2xl font-bold text-gray-800 mb-6 text-center">Excel ➝ TXT (somente dados)</h1>
 
-    <!-- Aba -->
-    <label class="block text-gray-700 mb-2">Escolha a aba:</label>
-    <select id="sheetSelect" class="border rounded-lg p-2 w-full mb-4"></select>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Coluna esquerda: controles -->
+      <div class="space-y-4">
+        <!-- Upload -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Selecione a planilha:</label>
+          <input id="fileInput" type="file" accept=".xlsx,.xls"
+                 class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none" />
+        </div>
 
-    <!-- Colunas -->
-    <label class="block text-gray-700 mb-2">Escolha as colunas:</label>
-    <div id="columnsContainer" class="grid grid-cols-2 gap-2 mb-4"></div>
+        <!-- Abas -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Escolha a aba:</label>
+          <select id="sheetSelect"
+                  class="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none">
+          </select>
+        </div>
 
-    <!-- Botão -->
-    <button id="convertBtn" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700">
-      Converter e Baixar TXT
-    </button>
+        <!-- Colunas -->
+        <div id="columnsContainer" class="hidden">
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-sm font-medium text-gray-700">Escolha as colunas:</label>
+            <div class="space-x-2 text-xs">
+              <button id="checkAll" class="px-2 py-1 border rounded hover:bg-gray-50">Marcar tudo</button>
+              <button id="uncheckAll" class="px-2 py-1 border rounded hover:bg-gray-50">Desmarcar tudo</button>
+            </div>
+          </div>
+          <div id="columnsList" class="grid grid-cols-2 gap-2"></div>
+        </div>
 
-    <!-- Preview -->
-    <div id="previewContainer" class="mt-6 hidden">
-      <h3 class="text-lg font-semibold mb-2 text-gray-700">Prévia dos dados</h3>
-      <table class="w-full border border-gray-300 text-sm text-left">
-        <thead id="previewHead" class="bg-gray-200"></thead>
-        <tbody id="previewBody"></tbody>
-      </table>
+        <!-- Exportar -->
+        <button id="convertBtn"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 rounded-lg transition">
+          Converter e Baixar TXT
+        </button>
+
+        <!-- Contador -->
+        <div id="counter" class="text-sm text-gray-600"></div>
+      </div>
+
+      <!-- Coluna direita: preview -->
+      <div>
+        <h2 class="text-lg font-semibold text-gray-800 mb-2">Pré-visualização (primeiras 10 linhas)</h2>
+        <div class="overflow-x-auto border border-gray-200 rounded-lg">
+          <table class="min-w-full text-sm text-left text-gray-700" id="previewTable">
+            <thead class="bg-gray-100" id="previewHead"></thead>
+            <tbody id="previewBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 
   <script>
     let workbookGlobal = null;
-    let currentRows = [];
+    let allRows = [];           // todas as linhas da aba (matriz)
+    let headerRowIndex = 0;     // índice da linha de cabeçalho detectada
+    let headerLabels = [];      // nomes das colunas (linha de cabeçalho)
+    const SEP = ";";            // separador fixo (requisito)
 
-    document.getElementById("fileInput").addEventListener("change", function (e) {
+    // Util: obter conjunto de linhas que possuem células mescladas
+    function getMergedRowsSet(sheet) {
+      const mergedSet = new Set();
+      const merges = sheet["!merges"] || [];
+      merges.forEach(m => {
+        for (let r = m.s.r; r <= m.e.r; r++) mergedSet.add(r);
+      });
+      return mergedSet;
+    }
+
+    // Util: verifica se célula tem "conteúdo real"
+    function hasValue(x) {
+      return x !== undefined && x !== null && String(x).trim() !== "";
+    }
+
+    // Encontrar a linha de cabeçalho ignorando linhas mescladas
+    function findHeaderRowIgnoringMerges(rows, mergedRowsSet) {
+      for (let i = 0; i < rows.length; i++) {
+        if (mergedRowsSet.has(i)) continue; // pula qualquer linha tocada por merge
+        const row = rows[i] || [];
+        // Heurística: precisa ter ao menos 2 células não vazias
+        const nonEmptyCount = row.reduce((acc, c) => acc + (hasValue(c) ? 1 : 0), 0);
+        if (nonEmptyCount >= 2) {
+          return i;
+        }
+      }
+      return 0; // fallback
+    }
+
+    // Carregar lista de abas após upload
+    document.getElementById("fileInput").addEventListener("change", (e) => {
       const file = e.target.files[0];
       if (!file) return;
 
       const reader = new FileReader();
-      reader.onload = function (evt) {
-        const data = new Uint8Array(evt.target.result);
+      reader.onload = (ev) => {
+        const data = new Uint8Array(ev.target.result);
         workbookGlobal = XLSX.read(data, { type: "array" });
 
-        // Preenche as abas
         const sheetSelect = document.getElementById("sheetSelect");
         sheetSelect.innerHTML = "";
         workbookGlobal.SheetNames.forEach((name, idx) => {
-          const option = document.createElement("option");
-          option.value = name;
-          option.textContent = name;
-          if (idx === 0) option.selected = true;
-          sheetSelect.appendChild(option);
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          if (idx === 0) opt.selected = true;
+          sheetSelect.appendChild(opt);
         });
 
-        carregarColunas();
+        // Carrega automaticamente a primeira aba
+        loadSheet(sheetSelect.value);
       };
       reader.readAsArrayBuffer(file);
     });
 
-    document.getElementById("sheetSelect").addEventListener("change", carregarColunas);
+    // Troca de aba
+    document.getElementById("sheetSelect").addEventListener("change", function () {
+      loadSheet(this.value);
+    });
 
-    function carregarColunas() {
-      const sheetName = document.getElementById("sheetSelect").value;
+    function loadSheet(sheetName) {
+      if (!workbookGlobal) return;
       const sheet = workbookGlobal.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      allRows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-      // Ignora linhas de cabeçalho vazias ou mescladas
-      const headerRow = rows.find(r => r.some(cell => cell !== undefined && cell !== null && cell !== ""));
-      currentRows = rows.slice(rows.indexOf(headerRow) + 1);
+      const mergedRowsSet = getMergedRowsSet(sheet);
+      headerRowIndex = findHeaderRowIgnoringMerges(allRows, mergedRowsSet);
 
-      const container = document.getElementById("columnsContainer");
-      container.innerHTML = "";
+      headerLabels = (allRows[headerRowIndex] || []).map(v => (hasValue(v) ? String(v) : ""));
 
-      if (headerRow) {
-        headerRow.forEach((col, idx) => {
-          if (col) {
-            const label = document.createElement("label");
-            label.className = "flex items-center space-x-2";
-            label.innerHTML = `<input type="checkbox" value="${idx}" checked class="columnCheck"> <span>${col}</span>`;
-            container.appendChild(label);
-          }
-        });
-      }
+      // Monta checkboxes das colunas com nomes válidos
+      const columnsList = document.getElementById("columnsList");
+      const columnsContainer = document.getElementById("columnsContainer");
+      columnsList.innerHTML = "";
 
-      mostrarPreview();
+      headerLabels.forEach((label, idx) => {
+        if (label) {
+          const wrap = document.createElement("label");
+          wrap.className = "flex items-center space-x-2";
+          wrap.innerHTML = `
+            <input type="checkbox" class="colCheckbox" value="${idx}" checked>
+            <span>${label}</span>
+          `;
+          columnsList.appendChild(wrap);
+        }
+      });
+
+      columnsContainer.classList.toggle("hidden", columnsList.children.length === 0);
+
+      // Eventos de marcar/desmarcar
+      document.getElementById("checkAll").onclick = () => {
+        document.querySelectorAll(".colCheckbox").forEach(cb => cb.checked = true);
+        updatePreviewAndCounter();
+      };
+      document.getElementById("uncheckAll").onclick = () => {
+        document.querySelectorAll(".colCheckbox").forEach(cb => cb.checked = false);
+        updatePreviewAndCounter();
+      };
+      columnsList.querySelectorAll(".colCheckbox").forEach(cb => {
+        cb.addEventListener("change", updatePreviewAndCounter);
+      });
+
+      updatePreviewAndCounter();
     }
 
-    function mostrarPreview() {
-      const checks = document.querySelectorAll(".columnCheck:checked");
-      const colIndexes = Array.from(checks).map(c => parseInt(c.value));
+    function getSelectedColIndexes() {
+      return Array.from(document.querySelectorAll(".colCheckbox:checked"))
+                  .map(cb => parseInt(cb.value));
+    }
 
+    function updatePreviewAndCounter() {
+      const selectedCols = getSelectedColIndexes();
       const previewHead = document.getElementById("previewHead");
       const previewBody = document.getElementById("previewBody");
-      const previewContainer = document.getElementById("previewContainer");
+      const counter = document.getElementById("counter");
 
       previewHead.innerHTML = "";
       previewBody.innerHTML = "";
 
-      if (colIndexes.length === 0 || currentRows.length === 0) {
-        previewContainer.classList.add("hidden");
+      if (selectedCols.length === 0 || allRows.length === 0) {
+        counter.textContent = "";
         return;
       }
 
-      // Cabeçalho
-      const headerRow = document.createElement("tr");
-      colIndexes.forEach(i => {
+      // Cabeçalho do preview (apenas visual)
+      const trHead = document.createElement("tr");
+      selectedCols.forEach(idx => {
         const th = document.createElement("th");
-        th.className = "border px-2 py-1";
-        th.textContent = i;
-        headerRow.appendChild(th);
+        th.className = "px-3 py-2 border-b border-gray-200";
+        th.textContent = headerLabels[idx] || `Col ${idx + 1}`;
+        trHead.appendChild(th);
       });
-      previewHead.appendChild(headerRow);
+      previewHead.appendChild(trHead);
 
-      // Linhas
-      currentRows.slice(0, 10).forEach(row => {
-        if (row.some(cell => cell !== undefined && cell !== null && cell !== "")) {
+      // Preencher até 10 linhas de dados (após o cabeçalho real)
+      let shown = 0;
+      let validCount = 0;
+      for (let i = headerRowIndex + 1; i < allRows.length; i++) {
+        const row = allRows[i] || [];
+        // Considera válida se houver pelo menos um valor entre as colunas selecionadas
+        const values = selectedCols.map(c => (row[c] !== undefined && row[c] !== null) ? row[c] : "");
+        const hasAny = values.some(v => String(v).trim() !== "");
+        if (!hasAny) continue;
+
+        validCount++;
+        if (shown < 10) {
           const tr = document.createElement("tr");
-          colIndexes.forEach(i => {
+          values.forEach(v => {
             const td = document.createElement("td");
-            td.className = "border px-2 py-1";
-            td.textContent = row[i] ?? "";
+            td.className = "px-3 py-2 border-b border-gray-100";
+            td.textContent = v;
             tr.appendChild(td);
           });
           previewBody.appendChild(tr);
+          shown++;
         }
-      });
+      }
 
-      previewContainer.classList.remove("hidden");
+      counter.textContent = `Linhas válidas a exportar: ${validCount.toLocaleString("pt-BR")}`;
     }
 
-    document.getElementById("columnsContainer").addEventListener("change", mostrarPreview);
-
-    document.getElementById("convertBtn").addEventListener("click", function () {
-      const checks = document.querySelectorAll(".columnCheck:checked");
-      const colIndexes = Array.from(checks).map(c => parseInt(c.value));
-
-      if (colIndexes.length === 0) {
-        alert("Selecione ao menos uma coluna!");
+    // Exportar TXT (sem cabeçalho)
+    document.getElementById("convertBtn").addEventListener("click", () => {
+      if (!workbookGlobal) {
+        alert("Selecione uma planilha primeiro!");
+        return;
+      }
+      const selectedCols = getSelectedColIndexes();
+      if (selectedCols.length === 0) {
+        alert("Selecione pelo menos uma coluna!");
         return;
       }
 
-      let txtContent = "";
-      currentRows.forEach(row => {
-        if (row.some(cell => cell !== undefined && cell !== null && cell !== "")) {
-          const line = colIndexes.map(i => row[i] ?? "").join(";");
-          if (line.replace(/;/g, "").trim() !== "") {
-            txtContent += line + "\n";
+      let out = "";
+      for (let i = headerRowIndex + 1; i < allRows.length; i++) {
+        const row = allRows[i] || [];
+        const fields = selectedCols.map(c => (row[c] !== undefined && row[c] !== null) ? row[c] : "");
+        // só grava se houver dado real na linha
+        if (fields.some(v => String(v).trim() !== "")) {
+          const line = fields.join(SEP);
+          // evita linhas só de separador (ex: ";;")
+          if (line.replace(new RegExp(SEP, "g"), "").trim() !== "") {
+            out += line + "\n";
           }
         }
-      });
+      }
 
-      const sheetName = document.getElementById("sheetSelect").value;
-      const blob = new Blob([txtContent], { type: "text/plain;charset=utf-8" });
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = sheetName + "_resultado.txt";
-      link.click();
+      const sheetName = document.getElementById("sheetSelect").value || "resultado";
+      const blob = new Blob([out], { type: "text/plain;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${sheetName}_resultado.txt`;
+      a.click();
     });
   </script>
 </body>
